@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="12" fill="#0a0a1a"/>
+  <!-- Bar chart icon -->
+  <rect x="10" y="38" width="10" height="16" rx="2" fill="#8b5cf6"/>
+  <rect x="24" y="28" width="10" height="26" rx="2" fill="#3b82f6"/>
+  <rect x="38" y="18" width="10" height="36" rx="2" fill="#22d3ee"/>
+  <!-- Arrow -->
+  <path d="M14 36 L32 20 L50 10" stroke="#22d3ee" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M44 10 L50 10 L50 16" stroke="#22d3ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

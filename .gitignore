@@ -1,0 +1,67 @@
+# ============================================
+# Forzeo GEO Dashboard - Git Ignore
+# ============================================
+
+# Environment variables (NEVER commit these!)
+.env
+.env.local
+.env.development
+.env.production
+.env*.local
+
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Supabase
+.supabase/
+supabase/.temp/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Vercel
+.vercel/
+
+# Local Netlify folder
+.netlify/
+
+# Secrets (extra safety)
+*.pem
+*.key
+secrets.json
+credentials.json
