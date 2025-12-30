@@ -1092,44 +1092,67 @@ async function queryGroq(
   
   const groqModel = groqModels[modelId] || "llama-3.3-70b-versatile";
   
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: groqModel,
-        messages: [
-          { role: "system", content: "You are a helpful assistant. Provide informative responses with specific recommendations and brand names where relevant. When listing options, use numbered lists." },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 1024,
-        temperature: 0.7,
-      }),
-    });
-    
-    const responseTime = Date.now() - startTime;
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Groq] Error: ${response.status} - ${errorText.substring(0, 200)}`);
-      return { success: false, response: "", cost: 0, error: `Groq API error: ${response.status}`, response_time_ms: responseTime };
+  // Retry logic with exponential backoff for rate limits
+  const maxRetries = 3;
+  let lastError = "";
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        // Exponential backoff: 2s, 4s, 8s
+        const delay = Math.pow(2, attempt) * 1000;
+        console.log(`[Groq/${modelId}] Rate limited, waiting ${delay}ms before retry ${attempt + 1}/${maxRetries}...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: groqModel,
+          messages: [
+            { role: "system", content: "You are a helpful assistant. Provide informative responses with specific recommendations and brand names where relevant. When listing options, use numbered lists." },
+            { role: "user", content: prompt }
+          ],
+          max_tokens: 1024,
+          temperature: 0.7,
+        }),
+      });
+      
+      const responseTime = Date.now() - startTime;
+      
+      if (response.status === 429) {
+        // Rate limited - retry
+        lastError = "Rate limit exceeded (429)";
+        console.warn(`[Groq/${modelId}] Rate limited (429), attempt ${attempt + 1}/${maxRetries}`);
+        continue;
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[Groq] Error: ${response.status} - ${errorText.substring(0, 200)}`);
+        return { success: false, response: "", cost: 0, error: `Groq API error: ${response.status}`, response_time_ms: responseTime };
+      }
+      
+      const data = await response.json();
+      const text = data.choices?.[0]?.message?.content || "";
+      
+      console.log(`[Groq/${modelId}] Got ${text.length} chars`);
+      
+      // Groq is very cheap/free
+      return { success: text.length > 0, response: text, cost: 0.0001, response_time_ms: responseTime };
+      
+    } catch (err) {
+      console.error(`[Groq] Exception: ${err}`);
+      lastError = String(err);
     }
-    
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || "";
-    
-    console.log(`[Groq/${modelId}] Got ${text.length} chars`);
-    
-    // Groq is very cheap/free
-    return { success: text.length > 0, response: text, cost: 0.0001, response_time_ms: responseTime };
-    
-  } catch (err) {
-    console.error(`[Groq] Exception: ${err}`);
-    return { success: false, response: "", cost: 0, error: String(err), response_time_ms: Date.now() - startTime };
   }
+  
+  // All retries failed
+  return { success: false, response: "", cost: 0, error: `Groq API failed after ${maxRetries} retries: ${lastError}`, response_time_ms: Date.now() - startTime };
 }
 
 /**
@@ -1456,8 +1479,15 @@ serve(async (req: Request) => {
         if (modelsNeedingDirectQuery.length > 0) {
           console.log(`[GEO Audit] No DataForSEO data for: ${modelsNeedingDirectQuery.join(", ")}. Querying LLMs directly...`);
           
-          // Query each LLM directly in parallel
-          const directQueries = modelsNeedingDirectQuery.map(async (modelId) => {
+          // Query each LLM sequentially with delay to avoid rate limits
+          for (let i = 0; i < modelsNeedingDirectQuery.length; i++) {
+            const modelId = modelsNeedingDirectQuery[i];
+            
+            // Add delay between queries to avoid rate limits (except for first query)
+            if (i > 0) {
+              await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5s delay
+            }
+            
             const directResult = await queryLLMDirect(prompt_text, modelId);
             totalCost += directResult.cost;
             
@@ -1497,9 +1527,7 @@ serve(async (req: Request) => {
                 directResult.error || "LLM query failed"
               ));
             }
-          });
-          
-          await Promise.all(directQueries);
+          }
         }
       })());
     }
