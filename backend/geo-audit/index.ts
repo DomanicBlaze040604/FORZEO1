@@ -64,8 +64,7 @@ const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
 // Anthropic API (for direct Claude queries)
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
 
-// Groq API (for content generation - fast and free)
-const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || "";
+// Note: Groq removed - using DataForSEO LIVE LLM API only
 
 // Supabase
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -787,7 +786,10 @@ async function getLLMMentions(
  * Uses /v3/ai_optimization/llm_responses/live endpoint
  * This guarantees fresh responses from the actual LLM
  * 
- * Cost: Higher than cached (~$0.05-0.10 per query)
+ * Features:
+ * - Retry logic with exponential backoff
+ * - Entropy/nonce to prevent caching
+ * - Cost: Higher than cached (~$0.05-0.10 per query)
  */
 async function getLiveLLMResponse(
   prompt: string,
@@ -803,48 +805,82 @@ async function getLiveLLMResponse(
   console.log(`[LIVE LLM/${model}] Querying real-time...`);
   const startTime = Date.now();
   
-  // Add entropy/nonce to prevent any caching
-  const entropy = `nonce:${Date.now()}-${Math.random().toString(36).substring(7)}`;
-  const promptWithEntropy = `${prompt}\n\n[${entropy}]`;
+  // Retry logic with exponential backoff
+  const maxRetries = 3;
+  let lastError = "";
+  let totalCost = 0;
   
-  const result = await callDataForSEO("/ai_optimization/llm_responses/live", [{
-    model: model,
-    prompt: promptWithEntropy,
-    temperature: 0.6,
-    max_tokens: 800,
-  }]);
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff: 2s, 4s, 8s
+      const delay = Math.pow(2, attempt) * 1000;
+      console.log(`[LIVE LLM/${model}] Retry ${attempt + 1}/${maxRetries}, waiting ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    // Add entropy/nonce to prevent any caching (unique per attempt)
+    const entropy = `nonce:${Date.now()}-${Math.random().toString(36).substring(7)}-attempt${attempt}`;
+    const promptWithEntropy = `${prompt}\n\n[${entropy}]`;
+    
+    const result = await callDataForSEO("/ai_optimization/llm_responses/live", [{
+      model: model,
+      prompt: promptWithEntropy,
+      temperature: 0.6,
+      max_tokens: 800,
+    }]);
+    
+    const latency = Date.now() - startTime;
+    
+    if (result.error) {
+      lastError = result.error;
+      console.error(`[LIVE LLM/${model}] Attempt ${attempt + 1} error: ${result.error}`);
+      
+      // Don't retry on auth/credit errors
+      if (result.status_code === 401 || result.status_code === 402) {
+        return { success: false, response: "", tokens: 0, cost: totalCost, latency_ms: latency, error: result.error };
+      }
+      continue;
+    }
+    
+    const data = result.data as { tasks?: Array<{ result?: Array<{ response?: string; usage?: { total_tokens?: number }; time?: number }>; cost?: number }> };
+    const task = data?.tasks?.[0];
+    const taskResult = task?.result?.[0];
+    const cost = task?.cost || 0;
+    totalCost += cost;
+    
+    if (!taskResult?.response) {
+      lastError = "No live LLM response returned";
+      console.error(`[LIVE LLM/${model}] Attempt ${attempt + 1}: No response returned`);
+      continue;
+    }
+    
+    // Remove the entropy from response if it appears
+    let cleanResponse = taskResult.response;
+    if (cleanResponse.includes(entropy)) {
+      cleanResponse = cleanResponse.replace(`[${entropy}]`, "").trim();
+    }
+    
+    console.log(`[LIVE LLM/${model}] Got ${cleanResponse.length} chars, ${taskResult.usage?.total_tokens || 0} tokens, ${latency}ms`);
+    
+    return {
+      success: true,
+      response: cleanResponse,
+      tokens: taskResult.usage?.total_tokens || 0,
+      cost: totalCost,
+      latency_ms: latency,
+    };
+  }
   
+  // All retries failed
   const latency = Date.now() - startTime;
-  
-  if (result.error) {
-    console.error(`[LIVE LLM/${model}] Error: ${result.error}`);
-    return { success: false, response: "", tokens: 0, cost: 0, latency_ms: latency, error: result.error };
-  }
-  
-  const data = result.data as { tasks?: Array<{ result?: Array<{ response?: string; usage?: { total_tokens?: number }; time?: number }>; cost?: number }> };
-  const task = data?.tasks?.[0];
-  const taskResult = task?.result?.[0];
-  const cost = task?.cost || 0;
-  
-  if (!taskResult?.response) {
-    console.error(`[LIVE LLM/${model}] No response returned`);
-    return { success: false, response: "", tokens: 0, cost, latency_ms: latency, error: "No live LLM response returned" };
-  }
-  
-  // Remove the entropy from response if it appears
-  let cleanResponse = taskResult.response;
-  if (cleanResponse.includes(entropy)) {
-    cleanResponse = cleanResponse.replace(`[${entropy}]`, "").trim();
-  }
-  
-  console.log(`[LIVE LLM/${model}] Got ${cleanResponse.length} chars, ${taskResult.usage?.total_tokens || 0} tokens, ${latency}ms`);
-  
-  return {
-    success: true,
-    response: cleanResponse,
-    tokens: taskResult.usage?.total_tokens || 0,
-    cost: cost,
-    latency_ms: latency,
+  console.error(`[LIVE LLM/${model}] All ${maxRetries} attempts failed: ${lastError}`);
+  return { 
+    success: false, 
+    response: "", 
+    tokens: 0, 
+    cost: totalCost, 
+    latency_ms: latency, 
+    error: `DataForSEO LIVE failed after ${maxRetries} attempts: ${lastError}` 
   };
 }
 
@@ -886,13 +922,13 @@ async function getLiveLLMWithValidation(
   let totalCost = 0;
   const responses: string[] = [];
   
-  // Query models sequentially to avoid rate limits
+  // Query models sequentially with longer delays to avoid rate limits
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     
-    // Add delay between queries
+    // Add longer delay between queries (2.5s)
     if (i > 0) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2500));
     }
     
     const result = await getLiveLLMResponse(prompt, model);
@@ -1228,104 +1264,8 @@ async function queryClaude(
 }
 
 /**
- * Query Groq API (fast, free tier available)
- * Uses Llama or Mixtral models
- */
-async function queryGroq(
-  prompt: string,
-  modelId: string = "llama"
-): Promise<{
-  success: boolean;
-  response: string;
-  cost: number;
-  error?: string;
-  response_time_ms?: number;
-}> {
-  if (!GROQ_API_KEY) {
-    return { success: false, response: "", cost: 0, error: "GROQ_API_KEY not configured" };
-  }
-  
-  console.log(`[Groq/${modelId}] Querying...`);
-  const startTime = Date.now();
-  
-  // Map model IDs to Groq models (using stable model names from Groq docs)
-  const groqModels: Record<string, string> = {
-    "llama": "llama-3.3-70b-versatile",
-    "mixtral": "llama-3.1-8b-instant",
-    "chatgpt": "llama-3.3-70b-versatile", // Simulate ChatGPT with Llama 3.3
-    "claude": "llama-3.3-70b-versatile",  // Simulate Claude with Llama 3.3
-    "gemini": "llama-3.3-70b-versatile",  // Simulate Gemini with Llama 3.3
-    "perplexity": "llama-3.3-70b-versatile",   // Simulate Perplexity with Llama 3.3
-  };
-  
-  const groqModel = groqModels[modelId] || "llama-3.3-70b-versatile";
-  
-  // Retry logic with exponential backoff for rate limits
-  const maxRetries = 3;
-  let lastError = "";
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      if (attempt > 0) {
-        // Exponential backoff: 2s, 4s, 8s
-        const delay = Math.pow(2, attempt) * 1000;
-        console.log(`[Groq/${modelId}] Rate limited, waiting ${delay}ms before retry ${attempt + 1}/${maxRetries}...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-      
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: groqModel,
-          messages: [
-            { role: "system", content: "You are a helpful assistant. Provide informative responses with specific recommendations and brand names where relevant. When listing options, use numbered lists." },
-            { role: "user", content: prompt }
-          ],
-          max_tokens: 1024,
-          temperature: 0.7,
-        }),
-      });
-      
-      const responseTime = Date.now() - startTime;
-      
-      if (response.status === 429) {
-        // Rate limited - retry
-        lastError = "Rate limit exceeded (429)";
-        console.warn(`[Groq/${modelId}] Rate limited (429), attempt ${attempt + 1}/${maxRetries}`);
-        continue;
-      }
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[Groq] Error: ${response.status} - ${errorText.substring(0, 200)}`);
-        return { success: false, response: "", cost: 0, error: `Groq API error: ${response.status}`, response_time_ms: responseTime };
-      }
-      
-      const data = await response.json();
-      const text = data.choices?.[0]?.message?.content || "";
-      
-      console.log(`[Groq/${modelId}] Got ${text.length} chars`);
-      
-      // Groq is very cheap/free
-      return { success: text.length > 0, response: text, cost: 0.0001, response_time_ms: responseTime };
-      
-    } catch (err) {
-      console.error(`[Groq] Exception: ${err}`);
-      lastError = String(err);
-    }
-  }
-  
-  // All retries failed
-  return { success: false, response: "", cost: 0, error: `Groq API failed after ${maxRetries} retries: ${lastError}`, response_time_ms: Date.now() - startTime };
-}
-
-/**
  * Query any LLM directly based on model ID
- * Falls back to Groq if specific API not configured
+ * Uses DataForSEO LIVE LLM API only (no Groq fallback)
  */
 async function queryLLMDirect(
   prompt: string,
@@ -1338,25 +1278,28 @@ async function queryLLMDirect(
   response_time_ms?: number;
   source: string;
 }> {
-  // Try specific API first, then fall back to Groq
-  if (modelId === "chatgpt" && OPENAI_API_KEY) {
-    const result = await queryChatGPT(prompt);
-    return { ...result, source: "openai" };
+  // Use DataForSEO LIVE LLM API for all models
+  if (["chatgpt", "gemini", "claude", "perplexity"].includes(modelId)) {
+    const result = await getLiveLLMResponse(prompt, modelId as "chatgpt" | "gemini" | "claude" | "perplexity");
+    return { 
+      success: result.success, 
+      response: result.response, 
+      cost: result.cost, 
+      error: result.error,
+      response_time_ms: result.latency_ms,
+      source: "dataforseo_live" 
+    };
   }
   
-  if (modelId === "claude" && ANTHROPIC_API_KEY) {
-    const result = await queryClaude(prompt);
-    return { ...result, source: "anthropic" };
-  }
-  
-  if (modelId === "gemini" && GEMINI_API_KEY) {
-    const result = await queryGemini(prompt, "");
-    return { ...result, source: "google" };
-  }
-  
-  // Fall back to Groq for all models (free and fast)
-  const result = await queryGroq(prompt, modelId);
-  return { ...result, source: "groq" };
+  // Unknown model
+  return { 
+    success: false, 
+    response: "", 
+    cost: 0, 
+    error: `Unsupported model: ${modelId}`,
+    response_time_ms: 0,
+    source: "none" 
+  };
 }
 
 // ============================================
@@ -1691,47 +1634,21 @@ serve(async (req: Request) => {
                   }
                 ));
               } else {
-                // LIVE LLM failed for this model - try Groq as last resort
-                console.log(`[GEO Audit] LIVE LLM failed for ${modelId}, trying Groq fallback...`);
+                // LIVE LLM failed for this model - show clear error (no Groq fallback)
+                console.log(`[GEO Audit] LIVE LLM failed for ${modelId} - DataForSEO LIVE is the only source`);
                 
-                const groqResult = await queryLLMDirect(prompt_text, modelId);
-                totalCost += groqResult.cost;
-                
-                if (groqResult.success) {
-                  const brandData = parseBrandData(groqResult.response, brand_name, sanitizedBrandTags);
-                  results.push(createModelResult(
-                    modelId,
-                    true,
-                    groqResult.response,
-                    [],
-                    groqResult.cost,
-                    brand_name,
-                    sanitizedBrandTags,
-                    targetDomain,
-                    sanitizedCompetitors,
-                    undefined,
-                    {
-                      brand_mentioned: brandData.mentioned,
-                      brand_mention_count: brandData.count,
-                      is_cited: false,
-                      response_time_ms: groqResult.response_time_ms,
-                    }
-                  ));
-                } else {
-                  // All methods failed
-                  results.push(createModelResult(
-                    modelId,
-                    false,
-                    `All data sources failed. Cached: No data | LIVE: Failed | Groq: ${groqResult.error || "Failed"}`,
-                    [],
-                    groqResult.cost,
-                    brand_name,
-                    sanitizedBrandTags,
-                    targetDomain,
-                    sanitizedCompetitors,
-                    "All data sources failed"
-                  ));
-                }
+                results.push(createModelResult(
+                  modelId,
+                  false,
+                  `DataForSEO LIVE LLM failed for ${modelId}. No cached data available and LIVE inference did not return a response. Please try again.`,
+                  [],
+                  0,
+                  brand_name,
+                  sanitizedBrandTags,
+                  targetDomain,
+                  sanitizedCompetitors,
+                  `DataForSEO LIVE LLM failed for ${modelId}`
+                ));
               }
             }
           }
