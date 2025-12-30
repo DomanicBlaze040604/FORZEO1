@@ -28,10 +28,9 @@ If your brand doesn't appear in AI responses, you're invisible to a growing audi
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  2. WE QUERY AI MODELS (3-tier system)                          │
+│  2. WE QUERY AI MODELS (2-tier system)                          │
 │     ├─ Tier 1: DataForSEO Cached Data (fast, cheap)             │
-│     ├─ Tier 2: DataForSEO LIVE LLM API (real-time)              │
-│     └─ Tier 3: Groq Fallback (last resort)                      │
+│     └─ Tier 2: DataForSEO LIVE LLM API (real-time inference)    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -50,7 +49,7 @@ If your brand doesn't appear in AI responses, you're invisible to a growing audi
 
 ---
 
-## Data Sources (3-Tier System)
+## Data Sources (2-Tier System)
 
 ### Tier 1: DataForSEO Cached (Primary)
 - `/llm_mentions/*` API - Historical/cached AI responses
@@ -61,12 +60,8 @@ If your brand doesn't appear in AI responses, you're invisible to a growing audi
 - `/llm_responses/live` API - Fresh LLM inference
 - Real-time responses with entropy to prevent caching
 - Multi-model validation to reduce hallucinations
+- Retry logic with exponential backoff
 - Cost: ~$0.05-0.10/query | Slower but accurate
-
-### Tier 3: Groq Fallback (Last Resort)
-- Only used when DataForSEO completely fails
-- Uses Llama 3.3 70B model
-- Cost: FREE (14,400 req/day limit)
 
 ### Google APIs
 - **AI Overview**: Google's AI-generated snippets
@@ -100,9 +95,9 @@ If your brand doesn't appear in AI responses, you're invisible to a growing audi
 - ✅ **Multi-Client** - Track multiple brands from one dashboard
 - ✅ **LIVE LLM** - Real-time inference when cached data unavailable
 - ✅ **Multi-Model Validation** - Cross-check responses to reduce hallucinations
+- ✅ **Retry Logic** - Exponential backoff for reliable API calls
 - ✅ **Competitor Analysis** - Compare brand vs competitors
 - ✅ **Citation Tracking** - See which sources AI cites
-- ✅ **Content Generation** - AI-powered SEO content via Groq
 - ✅ **Export Reports** - CSV, JSON, formatted text
 - ✅ **Database Storage** - All results saved to Supabase
 - ✅ **Dark Theme UI** - Professional dashboard interface
@@ -123,7 +118,6 @@ Create `.env` file:
 ```env
 VITE_SUPABASE_URL=https://pqvyyziaczzgaythgpyc.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
-VITE_GROQ_API_KEY=your-groq-key
 ```
 
 ### 3. Run Development Server
@@ -153,7 +147,6 @@ npx supabase functions deploy geo-audit --project-ref pqvyyziaczzgaythgpyc
 ```bash
 npx supabase secrets set DATAFORSEO_LOGIN=your-login --project-ref pqvyyziaczzgaythgpyc
 npx supabase secrets set DATAFORSEO_PASSWORD=your-password --project-ref pqvyyziaczzgaythgpyc
-npx supabase secrets set GROQ_API_KEY=your-groq-key --project-ref pqvyyziaczzgaythgpyc
 ```
 
 ---
@@ -166,7 +159,6 @@ npx supabase secrets set GROQ_API_KEY=your-groq-key --project-ref pqvyyziaczzgay
 | DataForSEO LIVE | ~$0.05-0.10/query | Real-time inference |
 | DataForSEO SERP | ~$0.002/query | Google results |
 | DataForSEO AI Overview | ~$0.003/query | Google AI snippets |
-| Groq | FREE | Fallback only |
 
 **Typical cost per prompt:** ~$0.03-0.15 (depending on data availability)
 
@@ -179,7 +171,7 @@ npx supabase secrets set GROQ_API_KEY=your-groq-key --project-ref pqvyyziaczzgay
 | Frontend | React, TypeScript, Tailwind CSS, Radix UI |
 | Backend | Supabase Edge Functions (Deno) |
 | Database | Supabase PostgreSQL |
-| APIs | DataForSEO, Groq |
+| APIs | DataForSEO |
 | Hosting | Netlify |
 
 ---

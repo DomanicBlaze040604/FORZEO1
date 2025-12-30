@@ -39,8 +39,8 @@ This document explains how every part of the system works in detail.
 │  │   Database      │  │  (Deno Runtime) │  │   (Files)     │   │
 │  │                 │  │                 │  │               │   │
 │  │  - clients      │  │  - geo-audit    │  │  - logos      │   │
-│  │  - prompts      │  │  - generate-    │  │  - exports    │   │
-│  │  - results      │  │    content      │  │               │   │
+│  │  - prompts      │  │                 │  │  - exports    │   │
+│  │  - results      │  │                 │  │               │   │
 │  └─────────────────┘  └─────────────────┘  └───────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -48,12 +48,17 @@ This document explains how every part of the system works in detail.
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    EXTERNAL APIs                                │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────┐   │
-│  │   DataForSEO    │  │   DataForSEO    │  │     Groq      │   │
-│  │   Google SERP   │  │   AI Overview   │  │   Llama 3.1   │   │
-│  │                 │  │                 │  │               │   │
-│  │  $0.002/query   │  │  $0.003/query   │  │    FREE       │   │
-│  └─────────────────┘  └─────────────────┘  └───────────────┘   │
+│  ┌─────────────────┐  ┌─────────────────┐                      │
+│  │   DataForSEO    │  │   DataForSEO    │                      │
+│  │   LLM Mentions  │  │   LIVE LLM      │                      │
+│  │   (Cached)      │  │   (Real-time)   │                      │
+│  │  $0.02/query    │  │  $0.05-0.10/q   │                      │
+│  └─────────────────┘  └─────────────────┘                      │
+│  ┌─────────────────┐  ┌─────────────────┐                      │
+│  │   DataForSEO    │  │   DataForSEO    │                      │
+│  │   Google SERP   │  │   AI Overview   │                      │
+│  │  $0.002/query   │  │  $0.003/query   │                      │
+│  └─────────────────┘  └─────────────────┘                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,10 +80,11 @@ Step 2: Frontend sends request to geo-audit Edge Function
           models: ["chatgpt", "google_ai_overview"]
         }
         ↓
-Step 3: Edge Function queries each AI model in parallel
-        ├── DataForSEO SERP API → Google search results
+Step 3: Edge Function queries each AI model
+        ├── DataForSEO LLM Mentions (cached) → If data exists
+        ├── DataForSEO LIVE LLM (real-time) → If no cached data
         ├── DataForSEO AI Overview → Google's AI answer
-        └── Groq API → Llama 3.1 response
+        └── DataForSEO SERP → Google search results
         ↓
 Step 4: Parse each response
         - Find brand mentions
@@ -683,7 +689,7 @@ CREATE TABLE forzeo_prompts (
 
 ## API Integration
 
-### 3-Tier Data Source System
+### 2-Tier Data Source System
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -694,17 +700,13 @@ CREATE TABLE forzeo_prompts (
 │     └── Fast & cheap (~$0.02/query)                                 │
 │     └── If data found → Use cached responses                        │
 │                                                                      │
-│  TIER 2: DataForSEO LIVE LLM API (Real-time) ← NEW!                 │
+│  TIER 2: DataForSEO LIVE LLM API (Real-time)                        │
 │     └── /llm_responses/live endpoint                                │
 │     └── Real-time inference from actual LLMs                        │
 │     └── Multi-model validation (ChatGPT, Gemini, Claude)            │
 │     └── Entropy/nonce to prevent caching                            │
+│     └── Retry logic with exponential backoff                        │
 │     └── Cost: ~$0.05-0.10/query                                     │
-│                                                                      │
-│  TIER 3: Groq Fallback (Last Resort)                                │
-│     └── Only used when DataForSEO completely fails                  │
-│     └── Uses Llama 3.3 70B model                                    │
-│     └── FREE (14,400 req/day)                                       │
 │                                                                      │
 │  GOOGLE APIs (Always queried):                                      │
 │     └── Google AI Overview (DataForSEO)                             │
@@ -740,17 +742,16 @@ When cached data is not available, we now use DataForSEO's LIVE LLM endpoint for
 
 | Model | Provider | Data Source | Cost |
 |-------|----------|-------------|------|
-| ChatGPT | OpenAI | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
-| Claude | Anthropic | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
-| Gemini | Google | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
-| Perplexity | Perplexity AI | Tier 1: Cached → Tier 2: LIVE → Tier 3: Groq | $0.02-0.10 |
+| ChatGPT | OpenAI | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
+| Claude | Anthropic | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
+| Gemini | Google | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
+| Perplexity | Perplexity AI | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
 | Google AI Overview | DataForSEO | DataForSEO SERP API | ~$0.003 |
 | Google SERP | DataForSEO | DataForSEO SERP API | ~$0.002 |
 
 **Data Source Priority:**
 1. **Cached (LLM Mentions)** - Fast, cheap, historical data
 2. **LIVE LLM** - Real-time inference, more expensive but accurate
-3. **Groq Fallback** - Free, only when DataForSEO fails completely
 
 ### DataForSEO - Google SERP
 
@@ -786,27 +787,6 @@ When cached data is not available, we now use DataForSEO's LIVE LLM endpoint for
 
 **Cost:** ~$0.003 per query
 
-### Groq - Llama 3.1
-
-**Endpoint:** `POST https://api.groq.com/openai/v1/chat/completions`
-
-**What it returns:** AI-generated response to the prompt
-
-**Cost:** FREE (14,400 requests/day limit)
-
-**Example Request:**
-```json
-{
-  "model": "llama-3.1-8b-instant",
-  "messages": [
-    {"role": "system", "content": "You are a helpful assistant..."},
-    {"role": "user", "content": "Best dating apps in India 2025"}
-  ],
-  "temperature": 0.7,
-  "max_tokens": 2048
-}
-```
-
 ---
 
 ## Cost Breakdown
@@ -815,11 +795,8 @@ When cached data is not available, we now use DataForSEO's LIVE LLM endpoint for
 |--------|-------------|------|
 | Single prompt (cached data available) | Tier 1: LLM Mentions | ~$0.02-0.03 |
 | Single prompt (no cached, LIVE LLM) | Tier 2: LIVE LLM | ~$0.10-0.15 |
-| Single prompt (fallback to Groq) | Tier 3: Groq | FREE |
 | Google AI Overview | DataForSEO | ~$0.003 |
 | Google SERP | DataForSEO | ~$0.002 |
-| Content generation | Groq | FREE |
-| Prompt generation | Groq | FREE |
 
 **Typical costs:**
 - 10 prompts (mostly cached): ~$0.30
