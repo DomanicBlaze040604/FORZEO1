@@ -783,15 +783,16 @@ async function getLLMMentions(
 
 /**
  * LIVE LLM Response API - Real-time inference (NOT cached)
- * Uses DataForSEO ChatGPT LLM Responses Live endpoint
+ * Uses DataForSEO provider-specific endpoints for each model
  * 
- * Endpoint: /v3/ai_optimization/chat_gpt/llm_responses/live
+ * Endpoints:
+ * - ChatGPT: /ai_optimization/chat_gpt/llm_responses/live
+ * - Gemini: /ai_optimization/gemini/llm_responses/live
+ * - Claude: /ai_optimization/claude/llm_responses/live
+ * - Perplexity: /ai_optimization/perplexity/llm_responses/live
+ * 
  * Required params: user_prompt, model_name
- * 
- * Features:
- * - Real-time GPT inference
- * - Retry logic with exponential backoff
- * - Cost: ~$0.001-0.002 per query
+ * Cost: ~$0.001-0.005 per query
  */
 async function getLiveLLMResponse(
   prompt: string,
@@ -804,12 +805,21 @@ async function getLiveLLMResponse(
   latency_ms: number;
   error?: string;
 }> {
-  console.log(`[LIVE LLM/${model}] Querying real-time via ChatGPT endpoint...`);
+  console.log(`[LIVE LLM/${model}] Querying real-time...`);
   const startTime = Date.now();
   
-  // Map model names to DataForSEO model_name
-  // Currently only ChatGPT is supported via this endpoint
-  const modelName = "gpt-4.1-mini";
+  // Map model IDs to DataForSEO endpoints and model names
+  const modelConfig: Record<string, { endpoint: string; modelName: string }> = {
+    chatgpt: { endpoint: "/ai_optimization/chat_gpt/llm_responses/live", modelName: "gpt-4.1-mini" },
+    gemini: { endpoint: "/ai_optimization/gemini/llm_responses/live", modelName: "gemini-2.5-flash" },
+    claude: { endpoint: "/ai_optimization/claude/llm_responses/live", modelName: "claude-sonnet-4-0" },
+    perplexity: { endpoint: "/ai_optimization/perplexity/llm_responses/live", modelName: "sonar-pro" },
+  };
+  
+  const config = modelConfig[model];
+  if (!config) {
+    return { success: false, response: "", tokens: 0, cost: 0, latency_ms: 0, error: `Unknown model: ${model}` };
+  }
   
   // Retry logic with exponential backoff
   const maxRetries = 3;
@@ -825,9 +835,9 @@ async function getLiveLLMResponse(
     }
     
     // Use the correct endpoint and parameters
-    const result = await callDataForSEO("/ai_optimization/chat_gpt/llm_responses/live", [{
+    const result = await callDataForSEO(config.endpoint, [{
       user_prompt: prompt,
-      model_name: modelName,
+      model_name: config.modelName,
       max_output_tokens: 800,
       temperature: 0.7,
     }]);
