@@ -1825,11 +1825,25 @@ serve(async (req: Request) => {
           if (modelData && modelData.answer && modelData.answer.length > 10) {
             // Got data from DataForSEO - use it regardless of brand visibility
             modelsWithData.add(modelId);
+            
+            // Use sources from LLM Mentions, but if empty, extract implicit citations
+            let citations = modelData.sources || [];
+            if (citations.length === 0) {
+              // Extract implicit citations from brand/competitor mentions in the answer
+              citations = extractImplicitCitations(
+                modelData.answer,
+                brand_name,
+                sanitizedBrandTags,
+                sanitizedCompetitors
+              );
+              console.log(`[LLM Mentions/${modelId}] No sources from API, extracted ${citations.length} implicit citations`);
+            }
+            
             results.push(createModelResult(
               modelId,
               true,
               modelData.answer,
-              modelData.sources,
+              citations,
               costPerModel,
               brand_name,
               sanitizedBrandTags,
