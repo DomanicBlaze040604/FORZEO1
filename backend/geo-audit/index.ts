@@ -1797,143 +1797,78 @@ serve(async (req: Request) => {
     const requestSERP = models.includes("google_serp");
     const requestAIOverview = models.includes("google_ai_overview");
 
-    // Query LLM Mentions API if any LLM models requested
+    // Query LLM models - ALWAYS use LIVE LLM API (no cached data)
     if (requestedLLMs.length > 0) {
       promises.push((async () => {
-        // First try DataForSEO LLM Mentions API - this is the PRIMARY source
-        const llmResult = await getLLMMentions(
-          prompt_text,
-          targetDomain,
-          brand_name,
-          sanitizedBrandTags,
-          location_code
-        );
+        // Skip LLM Mentions API entirely - go straight to LIVE LLM for real-time responses
+        console.log(`[GEO Audit] Using LIVE LLM API for all models: ${requestedLLMs.join(", ")}`);
         
-        const costPerModel = llmResult.cost / Math.max(1, requestedLLMs.length);
-        totalCost += llmResult.cost;
+        // Filter to supported LIVE LLM models
+        const liveModels = requestedLLMs.filter(m => 
+          ["chatgpt", "gemini", "claude", "perplexity"].includes(m)
+        ) as Array<"chatgpt" | "gemini" | "claude" | "perplexity">;
         
-        // Track which models got data from DataForSEO
-        const modelsWithData = new Set<string>();
-        
-        // Check if we got ANY data from DataForSEO (even if brand not mentioned)
-        const hasAnyDataForSEOData = llmResult.success && llmResult.results.size > 0;
-        
-        for (const modelId of requestedLLMs) {
-          const modelData = llmResult.results.get(modelId);
+        if (liveModels.length > 0) {
+          // Query LIVE LLM with validation - real-time inference only
+          const liveResult = await getLiveLLMWithValidation(
+            prompt_text,
+            brand_name,
+            sanitizedBrandTags,
+            sanitizedCompetitors,
+            liveModels
+          );
           
-          // Accept DataForSEO data even if short - show whatever we have
-          if (modelData && modelData.answer && modelData.answer.length > 10) {
-            // Got data from DataForSEO - use it regardless of brand visibility
-            modelsWithData.add(modelId);
+          totalCost += liveResult.totalCost;
+          
+          for (const modelId of liveModels) {
+            const modelData = liveResult.results.get(modelId);
             
-            // Use sources from LLM Mentions, but if empty, extract implicit citations
-            let citations = modelData.sources || [];
-            if (citations.length === 0) {
-              // Extract implicit citations from brand/competitor mentions in the answer
-              citations = extractImplicitCitations(
-                modelData.answer,
+            if (modelData) {
+              // Use extracted citations from the response text
+              const citations = modelData.citations || [];
+              
+              // Check if brand domain is cited
+              const isCited = citations.some(c =>
+                [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
+                  term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
+                          c.url.toLowerCase().includes(term.toLowerCase()))
+                )
+              );
+              
+              results.push(createModelResult(
+                modelId,
+                true,
+                modelData.response,
+                citations,
+                modelData.cost,
                 brand_name,
                 sanitizedBrandTags,
-                sanitizedCompetitors
-              );
-              console.log(`[LLM Mentions/${modelId}] No sources from API, extracted ${citations.length} implicit citations`);
-            }
-            
-            results.push(createModelResult(
-              modelId,
-              true,
-              modelData.answer,
-              citations,
-              costPerModel,
-              brand_name,
-              sanitizedBrandTags,
-              targetDomain,
-              sanitizedCompetitors,
-              undefined,
-              {
-                brand_mentioned: modelData.brand_mentioned,
-                brand_mention_count: modelData.brand_mention_count,
-                is_cited: modelData.brand_cited,
-                ai_search_volume: modelData.ai_search_volume,
-                response_time_ms: llmResult.response_time_ms,
-              }
-            ));
-          }
-        }
-        
-        // For models without cached data, try LIVE LLM API (real-time inference)
-        const modelsNeedingDirectQuery = requestedLLMs.filter(m => !modelsWithData.has(m));
-        
-        if (modelsNeedingDirectQuery.length > 0) {
-          console.log(`[GEO Audit] No cached data for: ${modelsNeedingDirectQuery.join(", ")}. Trying LIVE LLM API...`);
-          
-          // Try LIVE LLM API first (real-time inference from DataForSEO)
-          const liveModels = modelsNeedingDirectQuery.filter(m => 
-            ["chatgpt", "gemini", "claude", "perplexity"].includes(m)
-          ) as Array<"chatgpt" | "gemini" | "claude" | "perplexity">;
-          
-          if (liveModels.length > 0) {
-            // Query LIVE LLM with validation
-            const liveResult = await getLiveLLMWithValidation(
-              prompt_text,
-              brand_name,
-              sanitizedBrandTags,
-              sanitizedCompetitors,
-              liveModels
-            );
-            
-            totalCost += liveResult.totalCost;
-            
-            for (const modelId of liveModels) {
-              const modelData = liveResult.results.get(modelId);
+                targetDomain,
+                sanitizedCompetitors,
+                undefined,
+                {
+                  brand_mentioned: modelData.brand_mentioned,
+                  brand_mention_count: modelData.brand_mention_count,
+                  is_cited: isCited,
+                  response_time_ms: modelData.latency_ms,
+                }
+              ));
+            } else {
+              // LIVE LLM failed for this model
+              console.log(`[GEO Audit] LIVE LLM failed for ${modelId}`);
               
-              if (modelData) {
-                // Use extracted citations from the response text
-                const citations = modelData.citations || [];
-                
-                // Check if brand domain is cited
-                const isCited = citations.some(c =>
-                  [brand_name, targetDomain, ...sanitizedBrandTags].some(term =>
-                    term && (c.domain.toLowerCase().includes(term.toLowerCase()) ||
-                            c.url.toLowerCase().includes(term.toLowerCase()))
-                  )
-                );
-                
-                results.push(createModelResult(
-                  modelId,
-                  true,
-                  modelData.response,
-                  citations, // Now includes extracted citations from response
-                  modelData.cost,
-                  brand_name,
-                  sanitizedBrandTags,
-                  targetDomain,
-                  sanitizedCompetitors,
-                  undefined,
-                  {
-                    brand_mentioned: modelData.brand_mentioned,
-                    brand_mention_count: modelData.brand_mention_count,
-                    is_cited: isCited,
-                    response_time_ms: modelData.latency_ms,
-                  }
-                ));
-              } else {
-                // LIVE LLM failed for this model - show clear error (no Groq fallback)
-                console.log(`[GEO Audit] LIVE LLM failed for ${modelId} - DataForSEO LIVE is the only source`);
-                
-                results.push(createModelResult(
-                  modelId,
-                  false,
-                  `DataForSEO LIVE LLM failed for ${modelId}. No cached data available and LIVE inference did not return a response. Please try again.`,
-                  [],
-                  0,
-                  brand_name,
-                  sanitizedBrandTags,
-                  targetDomain,
-                  sanitizedCompetitors,
-                  `DataForSEO LIVE LLM failed for ${modelId}`
-                ));
-              }
+              results.push(createModelResult(
+                modelId,
+                false,
+                `LIVE LLM request failed for ${modelId}. Please try again.`,
+                [],
+                0,
+                brand_name,
+                sanitizedBrandTags,
+                targetDomain,
+                sanitizedCompetitors,
+                `LIVE LLM failed for ${modelId}`
+              ));
             }
           }
         }
