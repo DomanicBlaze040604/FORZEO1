@@ -1,7 +1,83 @@
 /**
- * Forzeo Client Dashboard Hook
- * Manages all state and logic for the AI Visibility Dashboard.
- * Primary storage: Supabase, with localStorage as cache/fallback.
+ * ============================================================================
+ * FORZEO CLIENT DASHBOARD HOOK
+ * ============================================================================
+ * 
+ * This is the main state management hook for the Forzeo GEO Dashboard.
+ * It manages all client data, prompts, audit results, and analytics.
+ * 
+ * ============================================================================
+ * DATA STORAGE
+ * ============================================================================
+ * 
+ * Primary: Supabase PostgreSQL database
+ * Fallback: localStorage (for offline/cache)
+ * 
+ * Tables used:
+ * - clients: Brand/client configurations
+ * - forzeo_prompts: Search prompts to analyze
+ * - audit_results: LLM response analysis results
+ * - forzeo_citations: Extracted source citations
+ * - forzeo_api_usage: API cost tracking
+ * 
+ * ============================================================================
+ * KEY FEATURES
+ * ============================================================================
+ * 
+ * Client Management:
+ * - Add, update, delete clients
+ * - Switch between clients
+ * - Configure brand tags and competitors
+ * 
+ * Prompt Management:
+ * - Add single or bulk prompts
+ * - Generate prompts from keywords (AI)
+ * - Import/export prompts
+ * - Categorize by niche level
+ * 
+ * Audit Execution:
+ * - Run full audit (all prompts)
+ * - Run single prompt audit
+ * - Re-run existing audits
+ * - Track loading states
+ * 
+ * Analytics:
+ * - Share of Voice calculation
+ * - Model-by-model visibility stats
+ * - Competitor gap analysis
+ * - Top sources aggregation
+ * - Insights and recommendations
+ * 
+ * Export:
+ * - CSV export
+ * - JSON export
+ * - Full text report
+ * 
+ * ============================================================================
+ * USAGE
+ * ============================================================================
+ * 
+ * ```tsx
+ * import { useClientDashboard } from "@/hooks/useClientDashboard";
+ * 
+ * function Dashboard() {
+ *   const {
+ *     clients,
+ *     selectedClient,
+ *     prompts,
+ *     auditResults,
+ *     summary,
+ *     runFullAudit,
+ *     addCustomPrompt,
+ *     // ... more
+ *   } = useClientDashboard();
+ * 
+ *   return <div>...</div>;
+ * }
+ * ```
+ * 
+ * @version 2.0.0
+ * @author Forzeo Team
  */
 
 import { useState, useCallback, useEffect } from "react";

@@ -1,6 +1,74 @@
 /**
- * Forzeo GEO Dashboard - Professional Theme UI with Light/Dark Mode
- * Complete implementation with Citations Summary, Sources URLs, Import Dialog
+ * ============================================================================
+ * FORZEO GEO DASHBOARD - MAIN UI COMPONENT
+ * ============================================================================
+ * 
+ * This is the main React component for the Forzeo GEO Dashboard.
+ * It provides a professional dark-themed UI for AI visibility analytics.
+ * 
+ * ============================================================================
+ * TABS
+ * ============================================================================
+ * 
+ * 1. Summary Tab:
+ *    - Share of Voice metric
+ *    - Average rank in AI responses
+ *    - Total citations count
+ *    - Cost tracking
+ *    - Visibility by model (bar charts)
+ *    - Competitor gap analysis
+ *    - Top sources list
+ *    - AI-generated insights
+ * 
+ * 2. Prompts Tab:
+ *    - Add single prompts
+ *    - Bulk add prompts
+ *    - AI prompt generator
+ *    - Run individual audits
+ *    - View detailed results
+ *    - Delete prompts
+ * 
+ * 3. Citations Tab:
+ *    - All citations aggregated
+ *    - Citation count by URL
+ *    - Model attribution
+ *    - Prompt attribution
+ * 
+ * 4. Content Tab:
+ *    - AI content generator
+ *    - Article, listicle, comparison, guide, FAQ types
+ *    - SEO-optimized output
+ * 
+ * 5. Sources Tab:
+ *    - Domain-level aggregation
+ *    - Full URL listing
+ *    - Citation counts
+ * 
+ * ============================================================================
+ * FEATURES
+ * ============================================================================
+ * 
+ * - Dark theme UI (professional look)
+ * - Model selection badges
+ * - Client switcher dropdown
+ * - Settings panel (brand tags, competitors)
+ * - Import/export functionality
+ * - Real-time loading states
+ * - Error handling
+ * - Date filtering
+ * 
+ * ============================================================================
+ * DEPENDENCIES
+ * ============================================================================
+ * 
+ * - React + TypeScript
+ * - Radix UI (Tabs, Dialog, Dropdown, etc.)
+ * - Tailwind CSS
+ * - Lucide React (icons)
+ * - useClientDashboard hook (state management)
+ * 
+ * @version 2.0.0
+ * @author Forzeo Team
  */
 
 import { useState, useRef, useMemo } from "react";
