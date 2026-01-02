@@ -963,8 +963,13 @@ async function getLiveLLMResponse(
     }
     
     // Use the correct endpoint and parameters
+    // Add instruction to include sources/URLs in the response
+    const enhancedPrompt = `${prompt}
+
+Please include relevant website URLs or sources in your response where applicable.`;
+    
     const result = await callDataForSEO(config.endpoint, [{
-      user_prompt: prompt,
+      user_prompt: enhancedPrompt,
       model_name: config.modelName,
       max_output_tokens: 800,
       temperature: 0.7,
@@ -1061,9 +1066,67 @@ async function getLiveLLMResponse(
 }
 
 /**
+ * Extract brand/product mentions as pseudo-citations
+ * When LIVE LLM responses don't contain URLs, we extract mentioned brands/products
+ * as "implicit citations" to show what sources the AI is referencing
+ */
+function extractImplicitCitations(
+  text: string,
+  brandName: string,
+  brandTags: string[],
+  competitors: string[]
+): Citation[] {
+  if (!text) return [];
+  
+  const citations: Citation[] = [];
+  const foundBrands = new Set<string>();
+  const lower = text.toLowerCase();
+  
+  // Check for brand mentions
+  const allBrands = [brandName, ...brandTags, ...competitors].filter(Boolean);
+  
+  for (const brand of allBrands) {
+    if (!brand || brand.length < 2) continue;
+    const brandLower = brand.toLowerCase();
+    
+    if (lower.includes(brandLower) && !foundBrands.has(brandLower)) {
+      foundBrands.add(brandLower);
+      
+      // Try to construct a likely URL for the brand
+      const cleanBrand = brand.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const likelyDomain = `${cleanBrand}.com`;
+      
+      citations.push({
+        url: `https://${likelyDomain}`,
+        title: brand,
+        domain: likelyDomain,
+        position: citations.length + 1,
+        snippet: `Mentioned in AI response`,
+        is_brand_source: brandLower === brandName.toLowerCase() || 
+                         brandTags.some(t => t.toLowerCase() === brandLower),
+      });
+    }
+  }
+  
+  // Also extract any URLs that ARE in the text
+  const urlCitations = extractUrlsFromText(text);
+  
+  // Merge, avoiding duplicates
+  for (const urlCitation of urlCitations) {
+    const domainLower = urlCitation.domain.toLowerCase();
+    if (!foundBrands.has(domainLower)) {
+      foundBrands.add(domainLower);
+      citations.push(urlCitation);
+    }
+  }
+  
+  return citations;
+}
+
+/**
  * Multi-model LIVE LLM query with cross-validation
  * Queries multiple models and checks for agreement to reduce hallucinations
- * Now also extracts URLs/citations from response text
+ * Now also extracts URLs/citations from response text AND implicit brand citations
  */
 async function getLiveLLMWithValidation(
   prompt: string,
@@ -1117,8 +1180,20 @@ async function getLiveLLMWithValidation(
       const brandData = parseBrandData(result.response, brandName, brandTags);
       
       // Extract URLs/citations from the response text
-      const extractedCitations = extractUrlsFromText(result.response);
-      console.log(`[LIVE LLM/${model}] Extracted ${extractedCitations.length} citations from response`);
+      let extractedCitations = extractUrlsFromText(result.response);
+      
+      // If no URLs found, extract implicit citations from brand/product mentions
+      if (extractedCitations.length === 0) {
+        extractedCitations = extractImplicitCitations(
+          result.response,
+          brandName,
+          brandTags,
+          competitors
+        );
+        console.log(`[LIVE LLM/${model}] No URLs found, extracted ${extractedCitations.length} implicit citations from brand mentions`);
+      } else {
+        console.log(`[LIVE LLM/${model}] Extracted ${extractedCitations.length} URL citations from response`);
+      }
       
       results.set(model, {
         response: result.response,
