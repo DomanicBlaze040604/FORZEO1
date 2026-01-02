@@ -695,18 +695,15 @@ CREATE TABLE forzeo_prompts (
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        geo-audit Edge Function                       │
 │                                                                      │
-│  TIER 1: DataForSEO LLM Mentions API (Cached)                       │
-│     └── Searches cached AI responses from DataForSEO database       │
-│     └── Fast & cheap (~$0.02/query)                                 │
-│     └── If data found → Use cached responses                        │
-│                                                                      │
-│  TIER 2: DataForSEO LIVE LLM API (Real-time)                        │
-│     └── /llm_responses/live endpoint                                │
-│     └── Real-time inference from actual LLMs                        │
-│     └── Multi-model validation (ChatGPT, Gemini, Claude)            │
+│  LIVE LLM APIs (Provider-Specific - Primary)                        │
+│     └── ChatGPT  → /content_generation/generate_live (OpenAI)       │
+│     └── Gemini   → /content_generation/generate_live (Google)       │
+│     └── Claude   → /content_generation/generate_live (Anthropic)    │
+│     └── Perplexity → /content_generation/generate_live (Perplexity) │
+│     └── Real-time inference from actual AI providers                │
 │     └── Entropy/nonce to prevent caching                            │
 │     └── Retry logic with exponential backoff                        │
-│     └── Cost: ~$0.05-0.10/query                                     │
+│     └── Cost: ~$0.05-0.10/query per model                           │
 │                                                                      │
 │  GOOGLE APIs (Always queried):                                      │
 │     └── Google AI Overview (DataForSEO)                             │
@@ -714,44 +711,51 @@ CREATE TABLE forzeo_prompts (
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### LIVE LLM API (New Feature)
+### LIVE LLM API Implementation
 
-When cached data is not available, we now use DataForSEO's LIVE LLM endpoint for real-time inference:
+Each AI model is queried via DataForSEO's provider-specific LIVE endpoints:
 
-**Endpoint:** `POST https://api.dataforseo.com/v3/ai_optimization/llm_responses/live`
+**Endpoint:** `POST https://api.dataforseo.com/v3/content_generation/generate_live`
+
+**Provider-Specific Models:**
+| Model | internal_model Parameter |
+|-------|--------------------------|
+| ChatGPT | `gpt-4o` |
+| Gemini | `gemini-2.0-flash` |
+| Claude | `claude-sonnet-4-20250514` |
+| Perplexity | `sonar` |
 
 **Features:**
-- Real-time inference from actual LLMs (not cached)
-- Entropy/nonce added to prevent any caching
-- Multi-model validation to reduce hallucinations
+- Real-time inference from actual AI providers (not simulated)
+- Each model uses its native API through DataForSEO
+- Entropy/nonce added to prompts to prevent caching
 - Sequential queries with delays to avoid rate limits
 
 **Example Request:**
 ```json
 {
-  "model": "chatgpt",
-  "prompt": "Best dating apps in India 2025\n\n[nonce:1735567890-abc123]",
-  "temperature": 0.6,
-  "max_tokens": 800
+  "text": "Best dating apps in India 2025",
+  "internal_model": "gpt-4o",
+  "max_tokens": 1500,
+  "temperature": 0.7,
+  "creativity_index": 0.5
 }
 ```
 
-**Cost:** ~$0.05-0.10 per query (higher than cached, but real data)
+**Cost:** ~$0.05-0.10 per query per model
 
 ### Supported AI Models
 
-| Model | Provider | Data Source | Cost |
-|-------|----------|-------------|------|
-| ChatGPT | OpenAI | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
-| Claude | Anthropic | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
-| Gemini | Google | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
-| Perplexity | Perplexity AI | Tier 1: Cached → Tier 2: LIVE | $0.02-0.10 |
-| Google AI Overview | DataForSEO | DataForSEO SERP API | ~$0.003 |
-| Google SERP | DataForSEO | DataForSEO SERP API | ~$0.002 |
+| Model | Provider | API Endpoint | internal_model | Cost |
+|-------|----------|--------------|----------------|------|
+| ChatGPT | OpenAI | content_generation/generate_live | gpt-4o | ~$0.05-0.10 |
+| Claude | Anthropic | content_generation/generate_live | claude-sonnet-4-20250514 | ~$0.05-0.10 |
+| Gemini | Google | content_generation/generate_live | gemini-2.0-flash | ~$0.05-0.10 |
+| Perplexity | Perplexity AI | content_generation/generate_live | sonar | ~$0.05-0.10 |
+| Google AI Overview | DataForSEO | serp/google/ai_overview/live | N/A | ~$0.003 |
+| Google SERP | DataForSEO | serp/google/organic/live | N/A | ~$0.002 |
 
-**Data Source Priority:**
-1. **Cached (LLM Mentions)** - Fast, cheap, historical data
-2. **LIVE LLM** - Real-time inference, more expensive but accurate
+**All LLM models use LIVE provider-specific APIs for real-time responses.**
 
 ### DataForSEO - Google SERP
 
@@ -791,17 +795,15 @@ When cached data is not available, we now use DataForSEO's LIVE LLM endpoint for
 
 ## Cost Breakdown
 
-| Action | Data Source | Cost |
-|--------|-------------|------|
-| Single prompt (cached data available) | Tier 1: LLM Mentions | ~$0.02-0.03 |
-| Single prompt (no cached, LIVE LLM) | Tier 2: LIVE LLM | ~$0.10-0.15 |
-| Google AI Overview | DataForSEO | ~$0.003 |
-| Google SERP | DataForSEO | ~$0.002 |
+| Action | Models | Cost |
+|--------|--------|------|
+| Single prompt (4 LLM models) | ChatGPT + Gemini + Claude + Perplexity | ~$0.20-0.40 |
+| Google AI Overview | 1 query | ~$0.003 |
+| Google SERP | 1 query | ~$0.002 |
 
 **Typical costs:**
-- 10 prompts (mostly cached): ~$0.30
-- 10 prompts (mostly LIVE): ~$1.50
-- 100 prompts (mixed): ~$3-15
+- 10 prompts (4 models each): ~$2.00-4.00
+- 100 prompts (4 models each): ~$20-40
 
 ---
 

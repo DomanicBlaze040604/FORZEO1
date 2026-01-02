@@ -28,9 +28,11 @@ If your brand doesn't appear in AI responses, you're invisible to a growing audi
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  2. WE QUERY AI MODELS (2-tier system)                          │
-│     ├─ Tier 1: DataForSEO Cached Data (fast, cheap)             │
-│     └─ Tier 2: DataForSEO LIVE LLM API (real-time inference)    │
+│  2. WE QUERY AI MODELS (LIVE provider-specific APIs)            │
+│     ├─ ChatGPT  → OpenAI GPT-4o (real-time)                     │
+│     ├─ Gemini   → Google Gemini (real-time)                     │
+│     ├─ Claude   → Anthropic Claude (real-time)                  │
+│     └─ Perplexity → Perplexity AI (real-time)                   │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -49,19 +51,24 @@ If your brand doesn't appear in AI responses, you're invisible to a growing audi
 
 ---
 
-## Data Sources (2-Tier System)
+## Data Sources (LIVE LLM System)
 
-### Tier 1: DataForSEO Cached (Primary)
-- `/llm_mentions/*` API - Historical/cached AI responses
-- Covers: ChatGPT, Claude, Gemini, Perplexity
-- Cost: ~$0.02/query | Fast response
+### DataForSEO LIVE LLM APIs (Provider-Specific)
+Each AI model is queried via its dedicated LIVE endpoint for real-time responses:
 
-### Tier 2: DataForSEO LIVE (Real-time)
-- `/llm_responses/live` API - Fresh LLM inference
-- Real-time responses with entropy to prevent caching
-- Multi-model validation to reduce hallucinations
-- Retry logic with exponential backoff
-- Cost: ~$0.05-0.10/query | Slower but accurate
+| Model | Endpoint | Provider |
+|-------|----------|----------|
+| ChatGPT | `/content_generation/generate_live` | OpenAI GPT-4o |
+| Gemini | `/content_generation/generate_live` | Google Gemini |
+| Claude | `/content_generation/generate_live` | Anthropic Claude |
+| Perplexity | `/content_generation/generate_live` | Perplexity AI |
+
+**Features:**
+- ✅ Real-time inference (no cached/simulated responses)
+- ✅ Provider-specific APIs for authentic responses
+- ✅ Entropy/nonce to prevent caching
+- ✅ Retry logic with exponential backoff
+- ✅ Cost: ~$0.05-0.10/query per model
 
 ### Google APIs
 - **AI Overview**: Google's AI-generated snippets
@@ -93,8 +100,8 @@ If your brand doesn't appear in AI responses, you're invisible to a growing audi
 
 - ✅ **6 AI Models** - ChatGPT, Claude, Gemini, Perplexity, Google AI Overview, SERP
 - ✅ **Multi-Client** - Track multiple brands from one dashboard
-- ✅ **LIVE LLM** - Real-time inference when cached data unavailable
-- ✅ **Multi-Model Validation** - Cross-check responses to reduce hallucinations
+- ✅ **LIVE LLM** - Real-time inference from actual AI providers (no simulated responses)
+- ✅ **Provider-Specific APIs** - Direct queries to ChatGPT, Gemini, Claude, Perplexity
 - ✅ **Retry Logic** - Exponential backoff for reliable API calls
 - ✅ **Competitor Analysis** - Compare brand vs competitors
 - ✅ **Citation Tracking** - See which sources AI cites
@@ -155,12 +162,14 @@ npx supabase secrets set DATAFORSEO_PASSWORD=your-password --project-ref pqvyyzi
 
 | Service | Cost | Notes |
 |---------|------|-------|
-| DataForSEO Cached | ~$0.02/query | Primary source |
-| DataForSEO LIVE | ~$0.05-0.10/query | Real-time inference |
+| ChatGPT (LIVE) | ~$0.05-0.10/query | OpenAI GPT-4o real-time |
+| Gemini (LIVE) | ~$0.05-0.10/query | Google Gemini real-time |
+| Claude (LIVE) | ~$0.05-0.10/query | Anthropic Claude real-time |
+| Perplexity (LIVE) | ~$0.05-0.10/query | Perplexity AI real-time |
 | DataForSEO SERP | ~$0.002/query | Google results |
 | DataForSEO AI Overview | ~$0.003/query | Google AI snippets |
 
-**Typical cost per prompt:** ~$0.03-0.15 (depending on data availability)
+**Typical cost per prompt (4 models):** ~$0.20-0.40
 
 ---
 
